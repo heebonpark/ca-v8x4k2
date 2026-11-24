@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "iter": 310000,
+  "salt": "Q0pfBqKWJ/ycZT6ijXIOIw==",
+  "checkIv": "e0dkVZEciLgmP+l3",
+  "checkCt": "WSObuSYEzpLTmTD2a/f0oZH9HO9gkMS3MubSmHrMwS1Z",
+  "builtAt": "2026-11-20",
+  "totalBytes": 9657895,
+  "files": [
+    "meta",
+    "map",
+    "c0",
+    "c1",
+    "c2",
+    "enrich",
+    "status"
+  ],
+  "vworldEncrypted": true
+}

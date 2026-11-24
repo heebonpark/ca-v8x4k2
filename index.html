@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="theme-color" content="#2a78d6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="기업분석">
+<title>기업분석 · 비공개</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./vendor/leaflet.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-view="list">
+
+<!-- ===== Private Vault Lock Screen ===== -->
+<div class="lock-screen" id="lockScreen">
+  <form class="lock-card" id="lockForm" autocomplete="off">
+    <div class="lock-head">
+      <div class="lock-badge">🔒</div>
+      <h1>비공개 기업분석</h1>
+      <p>AES-256-GCM 암호화 데이터<br>비밀번호를 입력해야 조회할 수 있습니다.</p>
+    </div>
+    <div class="pw-wrap">
+      <input id="pwInput" type="password" placeholder="접속 비밀번호 입력" autocomplete="current-password" required>
+      <button type="button" class="pw-eye" id="pwToggle" aria-label="비밀번호 보기">👁</button>
+    </div>
+    <label class="toggle" style="margin-top:12px">
+      <input type="checkbox" id="pwRemember" checked>
+      <span>이 기기에서 로그인 유지 (모바일 자동 잠금 해제)</span>
+    </label>
+    <div class="lock-err" id="lockErr"></div>
+    <button type="submit" class="lock-submit" id="pwSubmit">잠금 해제</button>
+    <div class="lock-foot">
+      모든 기업 데이터는 브라우저 안에서만 복호화됩니다.<br>
+      비밀번호 없이는 서버·소스코드 어디에서도 데이터를 볼 수 없습니다.
+    </div>
+  </form>
+</div>
+
+<!-- ===== Loader ===== -->
+<div class="loader" id="loader" hidden><div class="box">
+  <div class="brand" style="justify-content:center;font-size:18px"><span class="logo">企</span>기업분석 불러오는 중</div>
+  <div class="bar"><i id="lbar"></i></div>
+  <div class="tiny" id="ltxt">암호화 데이터 복호화 중…</div>
+</div></div>
+
+<!-- ===== Main App Shell ===== -->
+<div id="appShell" hidden>
+<header>
+  <div class="hrow">
+    <div class="brand"><span class="logo">企</span><span class="txt">기업분석<br><small id="srcTxt">DART 기업개황</small></span></div>
+    <div class="search" id="searchBox">
+      <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" autocomplete="off" enterkeyhint="search" placeholder="회사명 · 대표자 · 종목코드 · 사업자번호 · 초성(ㅅㅅㅈㅈ)" aria-label="통합 검색">
+      <button class="clr" id="qclr" aria-label="검색어 지우기">✕</button>
+    </div>
+    <button class="aisearch" id="aiSearchBtn" title="검색창 문장을 AI가 조건으로 자동 변환">✨ AI</button>
+    <button class="iconbtn fbtn" id="openF" aria-label="상세 조건">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+      <span class="txt">조건</span><span class="badge" id="fcount" hidden>0</span>
+    </button>
+    <button class="iconbtn" id="openSettings" aria-label="설정" title="설정 · AI 키 · 백업">⚙️</button>
+    <button class="iconbtn" id="lockNowBtn" aria-label="잠금" title="즉시 잠금 (로그아웃)">🔒</button>
+  </div>
+</header>
+
+<main class="app">
+  <!-- ===== Filters ===== -->
+  <section class="panel" id="filterPanel" aria-label="상세 조건">
+    <div class="ph"><h2>상세 조건 조회</h2>
+      <div><button class="resetbtn" id="resetAll">초기화</button>
+      <button class="iconbtn fclose" id="closeF" style="height:32px;min-width:32px;padding:0 10px">닫기</button></div>
+    </div>
+    <div class="scroll"><div class="filters">
+      <div class="fg" style="padding-top:8px"><span class="lbl">💾 저장된 조건 프리셋</span>
+        <div style="display:flex;gap:6px">
+          <input class="inp" id="presetNameIn" placeholder="현재 조건 저장 (예: 부평 우량제조)" style="height:34px;font-size:13px">
+          <button class="iconbtn sm" id="savePresetBtn" style="height:34px">저장</button>
+        </div>
+        <div class="preset-list" id="presetList"></div>
+      </div>
+      <button class="aibtn" id="proLeadPreset" style="margin-top:8px;background:linear-gradient(135deg,#1d4ed8,#7c3aed)">🏆 영업 우선순위 S·A등급 보기</button>
+      <div class="fg"><span class="lbl">🏆 전문가 퀀트·신용 조건 (TOP 10)</span>
+        <div class="tiny" style="margin-bottom:4px">영업 우선순위 (커스텀 가중치)</div>
+        <div class="chips" id="leadChips"><button class="chip" data-lg="S">S등급 (80+)</button><button class="chip" data-lg="A">A등급+ (70+)</button><button class="chip" data-lg="B">B등급+ (60+)</button></div>
+        <div class="tiny" style="margin:8px 0 4px">신용건전성 (Z-Score)</div>
+        <div class="chips" id="credChips"><button class="chip" data-cr="hi">우량 (AAA~A)</button><button class="chip" data-cr="mid">보통 (BBB~BB)</button><button class="chip" data-cr="lo">주의 (B~D)</button><button class="chip" data-cr="nozb">한계기업 제외</button></div>
+        <div class="tiny" style="margin:8px 0 4px">성장·수익 모멘텀 (Rule of 40)</div>
+        <div class="chips" id="patChips"><button class="chip" data-pt="r40">🔥 Rule of 40+</button><button class="chip" data-pt="cagr20">🚀 고성장 20%+</button><button class="chip" data-pt="prof3">💎 고마진 10%+</button><button class="chip" data-pt="grow2">⚡ 매출·인원 동반↑</button><button class="chip" data-pt="slump">⚠ 적자·둔화</button></div>
+        <div class="tiny" style="margin:8px 0 4px">HR 조직 활력</div>
+        <div class="chips" id="hrChips"><button class="chip" data-hr="1">🚀 급성장 채용</button><button class="chip" data-hr="2">💎 안정 우수</button><button class="chip" data-hr="3">⚡ 고이직(회전문)</button><button class="chip" data-hr="4">⚠ 인력이탈</button></div>
+        <div class="tiny" style="margin:8px 0 4px">1인당 매출 (생산성)</div>
+        <div class="chips" id="rpeChips"><button class="chip" data-rpe="5">5억+</button><button class="chip" data-rpe="10">10억+</button><button class="chip" data-rpe="20">20억+</button></div>
+      </div>
+      <button class="aibtn" id="aiPreset">✨ AI 도입 유망 기업 보기</button>
+      <div class="fg"><span class="lbl">AI 도입 적합도</span>
+        <div class="chips" id="aiChips"><button class="chip" data-s="0">전체</button><button class="chip" data-s="60">60점+</button><button class="chip" data-s="70">70점+</button><button class="chip" data-s="80">80점+</button></div>
+        <select class="inp" id="fAiCat" style="margin-top:8px"><option value="">AI 활용 분야 전체</option></select>
+        <p class="tiny" style="margin:6px 0 0;line-height:1.45">업종 적합도(50)+기업 규모(30)+업력(10)+디지털 접점(10)으로 계산한 참고 점수입니다.</p>
+      </div>
+      <button class="aibtn preset2" id="salesPreset" style="margin-top:8px">🎯 신규 영업 대상 (비고객 · 영업중)</button>
+      <div class="fg"><span class="lbl">영업 조건</span>
+        <div class="tiny" style="margin-bottom:4px">고객 구분</div><div class="chips" id="custChips"></div>
+        <div class="tiny" style="margin:8px 0 4px">사업자 상태</div><div class="chips" id="statChips"></div>
+        <div class="tiny" style="margin:8px 0 4px">담당 지사</div><div class="chips" id="brChips"></div>
+        <div class="tiny" style="margin:8px 0 4px">내 영업 메모 단계</div><div class="chips" id="memoChips"></div>
+      </div>
+      <button class="aibtn" id="futPreset" style="margin-top:8px;background:linear-gradient(135deg,#0ca30c,#1baf7a)">🌱 미래 강소기업 후보 보기</button>
+      <div class="fg"><span class="lbl">전망·채용·연봉</span>
+        <div class="chips" id="outChips"><button class="chip" data-k="fut">🌱 미래 강소 후보</button><button class="chip" data-o="60">전망 60+</button><button class="chip" data-o="70">전망 70+</button><button class="chip" data-o="80">전망 80+</button><button class="chip" data-k="netup">인원 증가</button><button class="chip" data-k="nip">순이익 흑자</button></div>
+        <div class="tiny" style="margin:8px 0 4px">평균 연봉</div><div class="chips" id="salChips"></div>
+      </div>
+      <div class="fg"><span class="lbl">기업 규모·실적</span>
+        <p class="tiny" id="enHint" style="margin:0 0 6px">매출·직원수는 [영업] 탭에서 보강 파일을 올리면 사용할 수 있습니다.</p>
+        <div class="tiny" style="margin-bottom:4px">매출액</div><div class="chips" id="revChips"></div>
+        <div class="tiny" style="margin:8px 0 4px">직원수</div><div class="chips" id="empChips"></div>
+        <div class="tiny" style="margin:8px 0 4px">실적·채용</div><div class="chips" id="perfChips"><button class="chip" data-k="prof">흑자(영업이익+)</button><button class="chip" data-k="grow">매출 성장</button><button class="chip" data-k="hire">채용 활발</button></div>
+        <div class="tiny" style="margin:8px 0 4px">강소기업·인증</div><div class="chips" id="tagChips"></div>
+      </div>
+      <div class="fg"><label for="fName">회사이름</label>
+        <input class="inp" id="fName" placeholder="예: 전자, 바이오, 홀딩스"></div>
+      <div class="fg"><span class="lbl">주소 (지역)</span>
+        <div class="row2">
+          <select class="inp" id="fSido"><option value="">시·도 전체</option></select>
+          <select class="inp" id="fSgg"><option value="">+ 시·군·구 추가</option></select>
+        </div>
+        <div class="chips" id="sggChips" style="margin-top:8px"></div>
+        <div class="sugg" style="margin-top:8px"><input class="inp" id="fDongIn" placeholder="읍·면·동 (예: 청천동,삼산동 → Enter)" autocomplete="off" enterkeyhint="done">
+          <div class="sugg-list" id="dongList" role="listbox"></div></div>
+        <div class="chips" id="dongChips" style="margin-top:8px"></div>
+        <input class="inp" id="fAddr" placeholder="주소 키워드 · 쉼표로 여러 개 (예: 테헤란로,판교)" style="margin-top:8px">
+        <p class="tiny" style="margin:6px 0 0;line-height:1.45">시·군·구, 읍·면·동은 여러 개 고르면 <b>또는(OR)</b>으로 묶입니다. 지도에서 지역을 누를 때마다 추가/해제됩니다.</p>
+      </div>
+      <div class="fg"><label for="fTel">전화번호</label>
+        <input class="inp" id="fTel" inputmode="tel" placeholder="숫자 일부 (예: 02-768, 1577)"></div>
+      <div class="fg"><label for="fHome">홈페이지</label>
+        <input class="inp" id="fHome" placeholder="도메인 키워드 (예: .co.kr, samsung)">
+        <label class="toggle"><input type="checkbox" id="fHasHome"> 홈페이지 등록 기업만</label>
+      </div>
+      <div class="fg"><span class="lbl">업종명</span>
+        <div class="sugg"><input class="inp" id="fIndIn" placeholder="업종 검색 후 선택 (복수 선택)" autocomplete="off">
+          <div class="sugg-list" id="indList" role="listbox"></div></div>
+        <div class="chips" id="indChips" style="margin-top:8px"></div>
+      </div>
+      <div class="fg"><span class="lbl">설립일</span>
+        <div class="row2">
+          <input class="inp" type="date" id="fFrom" aria-label="설립일 시작">
+          <input class="inp" type="date" id="fTo" aria-label="설립일 끝">
+        </div>
+        <div class="chips" id="estPreset" style="margin-top:8px">
+          <button class="chip" data-p="3">3년 이내</button><button class="chip" data-p="10">10년 이내</button>
+          <button class="chip" data-p="10-30">10~30년</button><button class="chip" data-p="30+">30년 이상</button><button class="chip" data-p="50+">50년 이상</button>
+        </div>
+      </div>
+      <div class="fg"><span class="lbl">법인구분</span><div class="chips" id="corpChips"></div></div>
+      <div class="fg"><label for="fFm">결산월</label>
+        <select class="inp" id="fFm"><option value="">전체</option></select></div>
+      <div class="fg">
+        <label class="toggle" style="margin:0"><input type="checkbox" id="fFav"> ⭐ 즐겨찾기한 기업만</label>
+        <label class="toggle"><input type="checkbox" id="fHasMemo"> 📝 영업 메모 있는 기업만</label>
+      </div>
+      <p class="tiny" style="margin:14px 0 0;line-height:1.5">상단 통합검색은 회사명·영문명·공시명·대표자·종목코드·사업자번호를 함께 찾고, 한글 초성(예: ㅅㅅㅈㅈ)도 인식합니다.</p>
+    </div></div>
+  </section>
+
+  <!-- ===== Results ===== -->
+  <section class="panel" id="listPanel" aria-label="조회 결과">
+    <div class="ph">
+      <div class="rcount"><b class="num" id="cnt">0</b> <span class="muted">개 기업</span></div>
+      <div class="rbar">
+        <select class="sort" id="sort" aria-label="정렬">
+          <option value="rel">관련도순</option><option value="lead">🏆 영업 우선순위순</option>
+          <option value="z">🛡 신용 안전도순</option><option value="cagr">📈 매출성장(YoY/CAGR)순</option>
+          <option value="rpe">⚡ 1인당 매출순</option><option value="roe">🔥 Rule of 40순</option>
+          <option value="pct">🎯 업종 백분위순</option><option value="name">회사명순</option>
+          <option value="old">설립 오래된순</option><option value="new">설립 최신순</option>
+          <option value="listed">상장사 우선</option><option value="ai">AI 적합도순</option><option value="rev">매출액순</option><option value="op">영업이익순</option><option value="margin">영업이익률순</option><option value="growth">매출 성장률순</option><option value="emp">직원수순</option><option value="hire">최근 입사자순</option><option value="out">전망 점수순</option><option value="sal">연봉순</option><option value="ni">순이익순</option><option value="net">인원 순증순</option>
+        </select>
+        <button class="iconbtn sm" id="dlCsv" title="조회 결과를 CSV 파일로 저장 (최대 50,000건)">CSV</button>
+        <button class="iconbtn sm" id="copyRes" title="결과를 표 형식으로 복사 (엑셀 붙여넣기)">복사</button>
+      </div>
+    </div>
+    <div class="active-f" id="activeF"></div>
+    <div class="scroll" id="listScroll">
+      <ul class="list" id="list"></ul>
+      <div class="more" id="more"></div>
+    </div>
+  </section>
+
+  <!-- ===== Map / Stats / EDA / Sales ===== -->
+  <section class="panel" id="sidePanel" aria-label="지도와 통계">
+    <div class="ph">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabMap" aria-selected="true" data-v="map">지도</button>
+        <button role="tab" id="tabStats" aria-selected="false" data-v="stats">통계</button>
+        <button role="tab" id="tabPro" aria-selected="false" data-v="pro">전문가</button>
+        <button role="tab" id="tabEda" aria-selected="false" data-v="eda">분석</button>
+        <button role="tab" id="tabSales" aria-selected="false" data-v="sales">영업</button>
+      </div>
+      <span class="tiny" id="mapCap">브이월드 일반 정밀지도 (도로·건물·지적·공시지가)</span>
+    </div>
+    <div class="view on" id="vMap">
+      <div class="mapwrap precision-on" id="mapwrap">
+        <svg id="map" role="img" aria-label="시군구별 기업 분포 지도"></svg>
+        <div class="sdbar" id="sdbar"></div>
+        <div class="mapmode" id="mapMode"><button data-m="precision" class="on">🗺 정밀지도</button><button data-m="count">기업 수</button><button data-m="branch">지사 관할</button></div>
+        <div id="vwMainMap" class="vw-main-wrap"></div>
+        <div class="assignbar" id="assignBar" hidden></div>
+        <div class="mapctl">
+          <button id="zin" aria-label="확대">+</button><button id="zout" aria-label="축소">−</button><button id="zreset" aria-label="전체 보기" style="font-size:14px">⤢</button>
+        </div>
+        <div class="legend" id="legend"></div>
+        <div class="maphint">드래그 이동 · 휠/핀치 확대 · 지역 클릭 시 필터</div>
+        <div class="tip" id="tip"></div>
+      </div>
+    </div>
+    <div class="view" id="vStats"><div class="scroll"><div class="stats" id="stats"></div></div></div>
+    <div class="view" id="vPro"><div class="scroll"><div class="progrid" id="pro"></div></div></div>
+    <div class="view" id="vEda"><div class="scroll"><div class="edagrid" id="eda"></div></div></div>
+    <div class="view" id="vSales"><div class="scroll"><div class="salesgrid" id="sales"></div></div></div>
+  </section>
+</main>
+
+<nav class="bnav" role="tablist" aria-label="화면 전환">
+  <button data-v="list" aria-selected="true"><span class="i">☰</span>목록</button>
+  <button data-v="map" aria-selected="false"><span class="i">🗺</span>지도</button>
+  <button data-v="stats" aria-selected="false"><span class="i">▤</span>통계</button>
+  <button data-v="pro" aria-selected="false"><span class="i">🏆</span>전문가</button>
+  <button data-v="eda" aria-selected="false"><span class="i">📈</span>분석</button>
+  <button data-v="sales" aria-selected="false"><span class="i">🎯</span>영업</button>
+</nav>
+</div>
+
+<!-- ===== Floating Compare Tray (Max 5) ===== -->
+<div class="cmp-tray" id="cmpTray" hidden>
+  <span>⚖️ <b id="cmpCnt">0</b>/5</span>
+  <div class="cmp-names" id="cmpNames"></div>
+  <button class="go" id="cmpOpenBtn">비교하기</button>
+  <button class="clr" id="cmpClearBtn">비우기</button>
+</div>
+
+<!-- ===== Side-by-Side Comparison Modal ===== -->
+<div class="modal wide" id="cmpModal" aria-hidden="true">
+  <div class="mhead">
+    <h3>⚖️ 다기업 전문가 비교 매트릭스</h3>
+    <div style="display:flex;gap:6px">
+      <button class="iconbtn sm" id="cmpCopyBtn">표 복사</button>
+      <button class="iconbtn sm" id="closeCmp">닫기</button>
+    </div>
+  </div>
+  <div id="cmpBody"></div>
+</div>
+
+<!-- ===== 1-Page Executive Briefing Modal ===== -->
+<div class="modal" id="briefModal" aria-hidden="true">
+  <div class="mhead">
+    <h3>📄 기업 분석 브리핑</h3>
+    <div style="display:flex;gap:6px">
+      <button class="iconbtn sm" id="briefCopyBtn" style="background:var(--accent);color:#fff;border-color:var(--accent)">복사</button>
+      <button class="iconbtn sm" id="closeBrief">닫기</button>
+    </div>
+  </div>
+  <div class="brief-pre" id="briefBody"></div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="detail" id="detail" aria-label="기업 상세" aria-hidden="true">
+  <div class="grab"></div>
+  <div id="dbody" style="display:flex;flex-direction:column;min-height:0;flex:1"></div>
+</aside>
+
+<!-- ===== Settings Modal ===== -->
+<div class="modal" id="settingsModal" aria-hidden="true">
+  <div class="mhead">
+    <h3>⚙️ 앱 설정</h3>
+    <button class="iconbtn sm" id="closeSettings">닫기</button>
+  </div>
+  <div class="mblock">
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">화면 테마</div>
+    <div class="chips" id="themeChips">
+      <button class="chip" data-th="auto">시스템 자동</button>
+      <button class="chip" data-th="light">라이트</button>
+      <button class="chip" data-th="dark">다크</button>
+    </div>
+  </div>
+  <div class="mblock">
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">🗺 브이월드 디지털트윈국토 인증키 (입지·지적·공시지가)</div>
+    <p class="tiny" style="margin:0 0 8px;line-height:1.45">Vault 암호화 번들에 기본 키가 안전하게 내장되어 있습니다. 새 키를 입력하면 이 브라우저에서 덮어씁니다.</p>
+    <div style="display:flex;gap:6px">
+      <input class="inp" type="password" id="vwKeyIn" placeholder="브이월드 인증키 (비우면 Vault 기본 키 사용)">
+      <button class="iconbtn sm" id="vwEyeBtn" style="height:38px" title="키 보기/숨기기">👁</button>
+      <button class="iconbtn sm" id="saveVwKey" style="height:38px">저장</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+      <span class="tiny">적용 키: <code id="vwKeyMask">확인 중…</code></span>
+      <button class="iconbtn sm" id="btnCheckVw">🩺 브이월드 연결 점검</button>
+    </div>
+    <div id="vwDiagOut" class="tiny" style="margin-top:6px"></div>
+  </div>
+  <div class="mblock">
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">✨ Gemini AI 연동 (선택)</div>
+    <p class="tiny" style="margin:0 0 8px;line-height:1.45">Google AI Studio에서 발급한 Gemini API 키를 넣으면 AI 자연어 검색·기업 분석·EDA 인사이트가 바로 동작합니다. 키는 이 브라우저에만 저장됩니다.</p>
+    <div style="display:flex;gap:6px">
+      <input class="inp" type="password" id="geminiKeyIn" placeholder="AIza...">
+      <button class="iconbtn sm" id="saveGeminiKey" style="height:38px">저장</button>
+    </div>
+  </div>
+  <div class="mblock">
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">📱 모바일 홈 화면에 설치 (PWA)</div>
+    <p class="tiny" style="margin:0 0 8px;line-height:1.45">iPhone Safari: 공유(↑) → <b>홈 화면에 추가</b><br>Android Chrome: 메뉴(⋮) → <b>앱 설치 / 홈 화면에 추가</b></p>
+    <button class="iconbtn sm" id="pwaInstallBtn" hidden>📲 지금 앱 설치하기</button>
+  </div>
+  <div class="mblock">
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">💾 내 즐겨찾기 · 영업 메모 백업</div>
+    <p class="tiny" style="margin:0 0 8px">PC ↔ 모바일 간 즐겨찾기·영업 메모·지사 설정을 JSON 파일로 옮길 수 있습니다.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="iconbtn sm" id="backupExport">백업 내려받기</button>
+      <label class="iconbtn sm" style="cursor:pointer">백업 불러오기<input type="file" id="backupImport" accept=".json" hidden></label>
+    </div>
+  </div>
+  <div class="mblock">
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">🔒 보안 및 캐시</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="iconbtn sm" id="modalLockBtn" style="color:var(--c8);border-color:var(--c8)">지금 잠금 (로그아웃)</button>
+      <button class="iconbtn sm" id="clearCacheBtn">오프라인 캐시 새로고침</button>
+    </div>
+    <p class="tiny" id="vaultInfo" style="margin:8px 0 0"></p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="./vendor/leaflet.min.js"></script>
+<script src="./vworld.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
