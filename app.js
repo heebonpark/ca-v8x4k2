@@ -97,7 +97,7 @@ async function verifyKey(key, vault) {
 }
 
 async function fetchAndDecryptJson(name) {
-  const res = await fetch(`./data/${name}.enc?v=${encodeURIComponent(VAULT_META.salt.slice(0, 8))}`);
+  const res = await fetch(`./data/${name}.enc?v=${encodeURIComponent((VAULT_META.builtAt || '') + '-' + VAULT_META.salt.slice(0, 6))}`);
   if (!res.ok) throw new Error(`${name}.enc 불러오기 실패 (${res.status})`);
   const buf = new Uint8Array(await res.arrayBuffer());
   const iv = buf.subarray(0, 12);
@@ -1576,8 +1576,8 @@ function anaSync() {
 }
 
 /* ==================== Enrich & Tags ==================== */
-const EK = ['rev', 'rev_p1', 'rev_p2', 'op', 'op_p1', 'op_p2', 'ni', 'assets', 'equity', 'emp', 'avg_sal', 'tenure', 'nps_emp', 'nps_new', 'nps_lost', 'nps_wage'];
-let EN = null, EN_META = null, TAGS = [], TAGM = null;
+const EK = ['rev', 'rev_p1', 'rev_p2', 'op', 'op_p1', 'op_p2', 'ni', 'assets', 'equity', 'emp', 'avg_sal', 'tenure', 'nps_emp', 'nps_new', 'nps_lost', 'nps_wage', 'fin_year'];
+let EN = null, EN_META = null, TAGS = [], TAGM = null, IND_REV_MULT = new Map();
 const REV_B = [['10억 미만', 0, 10], ['10~100억', 10, 100], ['100~1,000억', 100, 1000], ['1,000억~1조', 1000, 10000], ['1조 이상', 10000, 1e12]];
 const EMP_B = [['10명 미만', 0, 10], ['10~49명', 10, 50], ['50~299명', 50, 300], ['300~999명', 300, 1000], ['1,000명 이상', 1000, 1e9]];
 const TAG_COL = ['var(--c4)', 'var(--c7)', 'var(--c5)', 'var(--c6)', 'var(--c1)', 'var(--c3)', 'var(--c2)', 'var(--c8)'];
@@ -1588,6 +1588,26 @@ const revEok = i => EN && ok(EN.rev[i]) ? EN.rev[i] / 1e8 : NaN;
 const opMargin = i => EN && ok(EN.rev[i]) && ok(EN.op[i]) && EN.rev[i] > 0 ? EN.op[i] / EN.rev[i] * 100 : NaN;
 const revGrowth = i => EN && ok(EN.rev[i]) && ok(EN.rev_p1[i]) && EN.rev_p1[i] > 0 ? (EN.rev[i] / EN.rev_p1[i] - 1) * 100 : NaN;
 const hiring = i => EN && ok(EN.nps_new[i]) && EN.nps_new[i] >= Math.max(2, (ok(EN.nps_emp[i]) ? EN.nps_emp[i] : 0) * 0.03);
+function fallbackMultByInd(indName) {
+  const s = String(indName || '');
+  if (/도매|유통|상사|무역|소매|마트/.test(s)) return 6.2;
+  if (/건설|토목|건축|부동산|시공/.test(s)) return 5.4;
+  if (/제조|기계|전자|반도체|화학|금속|자동차|식품/.test(s)) return 4.8;
+  if (/운수|물류|창고|운송/.test(s)) return 4.4;
+  if (/소프트웨어|정보|통신|컴퓨터|프로그래밍|연구|엔지니어링|전문/.test(s)) return 3.0;
+  if (/경비|청소|시설|인력|파견|용역|미화/.test(s)) return 1.9;
+  return 4.0;
+}
+function estRevOf(i) {
+  if (!EN || ok(EN.rev[i])) return null;
+  const emp = ok(EN.nps_emp[i]) ? EN.nps_emp[i] : (ok(EN.emp[i]) ? EN.emp[i] : 0);
+  if (!(emp > 0)) return null;
+  const wage = ok(EN.nps_wage[i]) && EN.nps_wage[i] > 500000 ? EN.nps_wage[i] : (ok(EN.avg_sal[i]) && EN.avg_sal[i] > 6000000 ? Math.round(EN.avg_sal[i] / 12) : 3400000);
+  const indId = ROWS[i]?.[12];
+  const mult = IND_REV_MULT.get(indId) || fallbackMultByInd(META?.industries?.[indId]);
+  const payroll = emp * wage * 12;
+  return { won: Math.round(payroll * mult), emp: Math.round(emp), wage, mult, payroll };
+}
 
 function applyEnrich(list, meta) {
   EN = {}; EK.forEach(k => EN[k] = new Float64Array(N).fill(NaN));
@@ -1599,7 +1619,28 @@ function applyEnrich(list, meta) {
     if (v.fin_year) fy = String(v.fin_year).replace(/\.0+$/, '');
     if (v.nps_ym) ym = v.nps_ym;
   }
-  let fin = 0, emp = 0; for (let i = 0; i < N; i++) { if (ok(EN.rev[i])) fin++; if (ok(EN.emp[i]) || ok(EN.nps_emp[i])) emp++; }
+  let fin = 0, emp = 0;
+  const indRatios = new Map();
+  for (let i = 0; i < N; i++) {
+    if (ok(EN.rev[i])) fin++;
+    if (ok(EN.emp[i]) || ok(EN.nps_emp[i])) emp++;
+    if (ok(EN.rev[i]) && EN.rev[i] > 0 && ok(EN.nps_emp[i]) && EN.nps_emp[i] >= 5 && ok(EN.nps_wage[i]) && EN.nps_wage[i] > 1000000) {
+      const ratio = EN.rev[i] / (EN.nps_emp[i] * EN.nps_wage[i] * 12);
+      if (ratio >= 0.8 && ratio <= 30) {
+        const indId = ROWS[i][12];
+        if (!indRatios.has(indId)) indRatios.set(indId, []);
+        indRatios.get(indId).push(ratio);
+      }
+    }
+  }
+  IND_REV_MULT = new Map();
+  for (const [indId, arr] of indRatios.entries()) {
+    if (arr.length >= 3) {
+      arr.sort((a, b) => a - b);
+      const med = arr[Math.floor(arr.length / 2)];
+      IND_REV_MULT.set(indId, Math.max(1.8, Math.min(10.5, Number((med * 0.72).toFixed(2)))));
+    }
+  }
   EN_META = Object.assign({}, meta, { hit, fin, emp, finYear: meta.finYear || fy, npsYm: meta.npsYm || ym });
 }
 async function importEnrich(file) {
@@ -1661,7 +1702,13 @@ function renderTagChips() {
 }
 function enrichLine(i) {
   if (!EN) return ''; const p = [];
-  if (ok(EN.rev[i])) p.push(`매출 ${fmtEok(EN.rev[i])}`);
+  if (ok(EN.rev[i])) {
+    const fy = ok(EN.fin_year[i]) ? Math.round(EN.fin_year[i]) : (+EN_META?.finYear || 0);
+    p.push(`매출 ${fmtEok(EN.rev[i])}${fy ? ` <span style="font-size:10.5px;color:var(--c3);font-weight:700">(${fy} 공시)</span>` : ''}`);
+  } else {
+    const est = estRevOf(i);
+    if (est) p.push(`<span style="color:#4f46e5">추정매출 ~${fmtEok(est.won)}</span>`);
+  }
   if (ok(EN.op[i])) p.push(`<span style="color:${EN.op[i] < 0 ? 'var(--c8)' : 'inherit'}">영업이익 ${fmtEok(EN.op[i])}</span>`);
   const e = empOf(i); if (ok(e)) p.push(`직원 ${fmt(Math.round(e))}명`);
   if (hiring(i)) p.push(`<span style="color:var(--c3)">최근 입사 ${fmt(EN.nps_new[i])}명</span>`);
@@ -1686,10 +1733,11 @@ function finChart(vals, labels, unit) {
 function enrichSection(i) {
   const r = ROWS[i]; let h = '';
   if (EN && (ok(EN.rev[i]) || ok(EN.emp[i]) || ok(EN.nps_emp[i]))) {
-    const fy = +EN_META.finYear || 0, yl = fy ? [String(fy - 2).slice(2) + '년', String(fy - 1).slice(2) + '년', String(fy).slice(2) + '년'] : ['전전기', '전기', '당기'];
-    const m = opMargin(i), g = revGrowth(i);
-    h += `<div class="sec"><h4>재무·인력 <span class="tiny">${ok(EN.rev[i]) ? `DART ${EN_META.finYear || ''}` : ''}${ok(EN.nps_emp[i]) ? ` · 국민연금 ${esc(String(EN_META.npsYm || ''))}` : ''}</span></h4><div class="sales"><div class="fkpi">
-      ${ok(EN.rev[i]) ? `<div><span>매출액</span><b class="num">${fmtEok(EN.rev[i])}</b>${ok(g) ? `<em class="${g < 0 ? 'neg' : 'pos'}">${g >= 0 ? '▲' : '▼'} ${Math.abs(g).toFixed(1)}%</em>` : ''}</div>` : ''}
+    const fy = ok(EN.fin_year[i]) ? Math.round(EN.fin_year[i]) : (+EN_META.finYear || 0);
+    const yl = fy ? [String(fy - 2).slice(2) + '년', String(fy - 1).slice(2) + '년', String(fy).slice(2) + '년'] : ['전전기', '전기', '당기'];
+    const m = opMargin(i), g = revGrowth(i), est = estRevOf(i);
+    h += `<div class="sec"><h4>재무·인력 <span class="tiny">${ok(EN.rev[i]) ? `금융위·DART ${fy || ''} 공식결산` : (est ? '국민연금 실급여 추정' : '')}${ok(EN.nps_emp[i]) ? ` · 국민연금 ${esc(String(EN_META.npsYm || ''))}` : ''}</span></h4><div class="sales"><div class="fkpi">
+      ${ok(EN.rev[i]) ? `<div><span>매출액 (${fy || ''} 공시)</span><b class="num">${fmtEok(EN.rev[i])}</b>${ok(g) ? `<em class="${g < 0 ? 'neg' : 'pos'}">${g >= 0 ? '▲' : '▼'} ${Math.abs(g).toFixed(1)}%</em>` : ''}</div>` : (est ? `<div><span>추정 매출액</span><b class="num" style="color:#4f46e5">~${fmtEok(est.won)}</b><em>국민연금×${est.mult}x</em></div>` : '')}
       ${ok(EN.op[i]) ? `<div><span>영업이익</span><b class="num${EN.op[i] < 0 ? ' negc' : ''}">${fmtEok(EN.op[i])}</b>${ok(m) ? `<em>이익률 ${m.toFixed(1)}%</em>` : ''}</div>` : ''}
       ${ok(EN.ni[i]) ? `<div><span>순이익</span><b class="num${EN.ni[i] < 0 ? ' negc' : ''}">${fmtEok(EN.ni[i])}</b></div>` : ''}
       ${ok(empOf(i)) ? `<div><span>직원수</span><b class="num">${fmt(Math.round(empOf(i)))}명</b><em>${ok(EN.emp[i]) ? '사업보고서' : '국민연금 가입자'}</em></div>` : ''}
@@ -1734,7 +1782,10 @@ async function enrichClick(a, b) {
 }
 async function initEnrich() {
   let ie = null; try { ie = await idb.get('enrich'); } catch {}
-  if (ie) applyEnrich(ie.list, ie.meta); else if (BAKED) applyEnrich(BAKED.list, BAKED.meta);
+  const useBaked = BAKED && (!ie || !ie.meta?.version || ie.meta.version !== BAKED.meta?.version);
+  if (useBaked) applyEnrich(BAKED.list, BAKED.meta);
+  else if (ie) applyEnrich(ie.list, ie.meta);
+  else if (BAKED) applyEnrich(BAKED.list, BAKED.meta);
   let it = null; try { it = await idb.get('tags'); } catch {}
   if (Array.isArray(it)) TAGS = it; else if (BAKED && BAKED.tags) TAGS = BAKED.tags;
   rebuildTagM();

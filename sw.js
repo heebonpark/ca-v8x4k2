@@ -1,9 +1,9 @@
-const CACHE_NAME = 'corpx-pwa-v5';
+const CACHE_NAME = 'corpx-pwa-v6';
 const SHELL = [
   './',
   './index.html',
   './styles.css',
-  './app.js',
+  './app.js?v=6',
   './vworld.js',
   './vendor/leaflet.css',
   './vendor/leaflet.min.js',
